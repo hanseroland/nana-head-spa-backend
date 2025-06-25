@@ -39,16 +39,32 @@ const userSchema = new mongoose.Schema(
             trim: true,
             required: true,
         },
-        loyaltyLevel: {
-            type: Number,
-            default: 0,
+        // --- Début des modifications pour la fidélisation ---
+        fidelity: { // Regroupement des champs de fidélité dans un objet imbriqué
+            level: {
+                type: Number,
+                default: 1, // Le client commence au niveau 1 (non 0, pour 1000 niveaux)
+                min: 1,
+                max: 1000 // Limite max de 1000 niveaux comme spécifié
+            },
+            lastAdWatchedAt: { // Stocke la date et l'heure de la dernière publicité vue pour le passage de niveau
+                type: Date,
+                default: null // Initialisation à null pour les nouveaux utilisateurs
+            }
+            // watchedAdToday est géré par la logique du `lastAdWatchedAt` et non un champ booléen persistant
+            // Car 'aujourd'hui' est relatif et change chaque jour
         },
+        // --- Fin des modifications pour la fidélisation ---,
         watchedAdToday: {
             type: Boolean,
             default: false,
         },
         lastAdWatchedDate: {
             type: Date,
+        },
+        totalAdsWatched: { // <-- AJOUTE CE CHAMP pour le compteur global par utilisateur
+            type: Number,
+            default: 0
         },
         resetPasswordToken: String,
         resetPasswordExpires: Date,

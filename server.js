@@ -35,7 +35,7 @@ const authRouter = require('./routes/authRoutes');
 const formulasRouter = require('./routes/formulaRoutes');
 const articlesRouter = require('./routes/articleRoutes');
 const appointmentsRouter = require('./routes/appointmentRoutes');
-
+const fidelityRoutes = require('./routes/fidelityRoutes');
 
 
 
@@ -46,6 +46,8 @@ app.use(`${api}/users`, usersRouter);
 app.use(`${api}/formulas`, formulasRouter);
 app.use(`${api}/articles`, articlesRouter);
 app.use(`${api}/appointments`, appointmentsRouter);
+app.use(`${api}/fidelity`, fidelityRoutes);
+
 
 
 
@@ -56,7 +58,7 @@ app.use(`${api}/appointments`, appointmentsRouter);
 
 
 mongoose.set("strictQuery", false);
-mongoose.connect(process.env.MONGODB_URL_ONLINE)
+mongoose.connect(process.env.MONGODB_URL)
     .then(() => console.log('DBconnection succès!'))//message à afficher si mongoDB fonctionne normalement
     .catch((err) => {
         console.log(err);

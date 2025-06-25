@@ -131,7 +131,7 @@ router.get('/my', authMiddleware, async (req, res) => {
     try {
         const clientId = req.user.userId;
         const clientAppointments = await Appointment.find({ client: clientId })
-            .populate('formula') // Popule les détails de la formule
+            .populate('formula', 'title price') // Popule les détails de la formule
             .sort({ date: -1, startTime: -1 }); // Tri du plus récent au plus ancien
 
         res.status(200).json({ success: true, message: 'Vos rendez-vous ont été récupérés.', data: clientAppointments });
@@ -158,6 +158,223 @@ router.get('/history', authMiddleware, async (req, res) => {
         res.status(500).json({ success: false, message: 'Erreur serveur lors de la récupération de votre historique de soins.', error: error.message });
     }
 });
+
+// Route: GET /api/v1/appointments/upcoming
+router.get('/upcoming', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const now = new Date();
+        const twoDaysLater = new Date();
+        twoDaysLater.setDate(now.getDate() + 2); // Rendez-vous pour aujourd'hui et les 2 prochains jours
+
+        const upcomingAppointments = await Appointment.find({
+            date: { $gte: now, $lte: twoDaysLater },
+            status: { $in: ['pending', 'confirmed', 'in_progress'] } // Statuts qui nous intéressent
+        })
+            .populate('client', 'firstName lastName') // Peuple les infos du client
+            .populate('formula', 'title') // Peuple le titre de la formule
+            .sort({ date: 1, startTime: 1 }); // Trie par date puis heure
+
+        res.status(200).json({ success: true, message: 'Rendez-vous à venir récupérés.', data: upcomingAppointments });
+    } catch (error) {
+        console.error("Erreur API lors de la récupération des rendez-vous à venir:", error);
+        res.status(500).json({ success: false, message: "Erreur serveur lors de la récupération des rendez-vous à venir.", error: error.message });
+    }
+});
+
+
+//Compter les rendez-vous total et par statut
+// Route: GET /api/v1/appointments/stats/counts-by-status
+router.get('/stats/counts-by-status', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const appointmentCounts = await Appointment.aggregate([
+            {
+                $group: {
+                    _id: "$status",
+                    count: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const totalAppointments = appointmentCounts.reduce((acc, curr) => acc + curr.count, 0);
+
+        const statusCounts = {};
+        appointmentCounts.forEach(item => {
+            statusCounts[item._id] = item.count;
+        });
+
+        res.status(200).json({
+            success: true,
+            message: 'Statistiques rendez-vous récupérées.',
+            data: {
+                totalAppointments,
+                statusCounts
+            }
+        });
+    } catch (error) {
+        console.error("Erreur API lors de la récupération des stats rendez-vous:", error);
+        res.status(500).json({ success: false, message: "Erreur serveur lors de la récupération des statistiques rendez-vous.", error: error.message });
+    }
+});
+
+
+// Nouvelle route: Top 5 des formules les plus/moins réservées
+// Route: GET /api/v1/appointments/stats/formula-popularity
+router.get('/stats/formula-popularity', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        // Formules les plus réservées
+        const mostReservedFormulas = await Appointment.aggregate([
+            {
+                $group: {
+                    _id: "$formula",
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'formulas', // Nom de la collection des formules
+                    localField: '_id',
+                    foreignField: '_id',
+                    as: 'formulaDetails'
+                }
+            },
+            {
+                $unwind: '$formulaDetails'
+            },
+            {
+                $project: {
+                    _id: 0,
+                    formulaId: "$_id",
+                    title: "$formulaDetails.title",
+                    count: "$count"
+                }
+            },
+            {
+                $sort: { count: -1 } // Trie par le plus réservé en premier
+            },
+            {
+                $limit: 5
+            }
+        ]);
+
+        // Formules les moins réservées
+        // Cela peut être tricky car les formules non réservées n'apparaîtront pas dans les RDV.
+        // Pour les moins réservées, il est plus juste de prendre toutes les formules et de compter 0 si non réservées.
+        // Cela implique de faire un lookup inverse ou de récupérer toutes les formules d'abord.
+        // Pour simplifier et répondre au besoin du dashboard (moins populaires PARMI CELLES QUI ONT ÉTÉ RÉSERVÉES),
+        // on peut juste trier dans l'ordre croissant. Pour vraiment "moins réservées", il faudrait inclure celles à 0.
+        // Si tu veux celles à 0, il faudra une logique plus complexe impliquant la collection 'formulas'.
+        // Pour l'instant, je vais implémenter "top 5 les moins populaires" PARMI CELLES QUI ONT EU AU MOINS UNE RÉSERVATION.
+
+        const leastReservedFormulas = await Appointment.aggregate([
+            {
+                $group: {
+                    _id: "$formula",
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $lookup: {
+                    from: 'formulas', // Nom de la collection des formules
+                    localField: '_id',
+                    foreignField: '_id',
+                    as: 'formulaDetails'
+                }
+            },
+            {
+                $unwind: '$formulaDetails'
+            },
+            {
+                $project: {
+                    _id: 0,
+                    formulaId: "$_id",
+                    title: "$formulaDetails.title",
+                    count: "$count"
+                }
+            },
+            {
+                $sort: { count: 1 } // Trie par le moins réservé en premier
+            },
+            {
+                $limit: 5
+            }
+        ]);
+
+
+        res.status(200).json({
+            success: true,
+            message: 'Popularité des formules récupérée.',
+            data: {
+                mostReserved: mostReservedFormulas,
+                leastReserved: leastReservedFormulas
+            }
+        });
+    } catch (error) {
+        console.error("Erreur API lors de la récupération de la popularité des formules:", error);
+        res.status(500).json({ success: false, message: "Erreur serveur lors de la récupération de la popularité des formules.", error: error.message });
+    }
+});
+
+
+// Route: GET /api/v1/appointments/stats/monthly-trend
+router.get('/stats/monthly-trend', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+        const now = new Date();
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(now.getMonth() - 2); // Les 3 derniers mois (y compris le mois actuel)
+        threeMonthsAgo.setDate(1); // Début du mois
+        threeMonthsAgo.setHours(0, 0, 0, 0);
+
+        // Filtrage optionnel par statut
+        const matchConditions = {
+            date: { $gte: threeMonthsAgo, $lte: now }
+        };
+        if (req.query.status) {
+            matchConditions.status = req.query.status;
+        }
+        if (req.query.formulaId) {
+            matchConditions.formula = req.query.formulaId;
+        }
+
+        const monthlyAppointments = await Appointment.aggregate([
+            {
+                $match: matchConditions
+            },
+            {
+                $group: {
+                    _id: {
+                        year: { $year: "$date" },
+                        month: { $month: "$date" }
+                    },
+                    count: { $sum: 1 }
+                }
+            },
+            {
+                $sort: { "_id.year": 1, "_id.month": 1 }
+            }
+        ]);
+
+        // Formater les résultats pour inclure les mois sans rendez-vous
+        const result = [];
+        let current = new Date(threeMonthsAgo);
+        while (current <= now) {
+            const year = current.getFullYear();
+            const month = current.getMonth() + 1; // getMonth() est basé sur 0
+            const found = monthlyAppointments.find(item => item._id.year === year && item._id.month === month);
+            result.push({
+                date: new Date(year, month - 1, 1).toISOString(), // Premier jour du mois
+                count: found ? found.count : 0
+            });
+            current.setMonth(current.getMonth() + 1);
+        }
+
+        res.status(200).json({ success: true, message: 'Progression mensuelle des rendez-vous récupérée.', data: result });
+    } catch (error) {
+        console.error("Erreur API lors de la récupération de la progression des rendez-vous:", error);
+        res.status(500).json({ success: false, message: "Erreur serveur lors de la récupération de la progression des rendez-vous.", error: error.message });
+    }
+});
+
+
 
 // PUT Annuler un rendez-vous (par le client ou l'admin)
 // Route: PUT /api/v1/appointments/:id/cancel

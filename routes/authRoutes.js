@@ -16,9 +16,6 @@ const secret = process.env.PASS_SEC
 //Création d'un compte utilisateur
 router.post('/register', async (req, res) => {
 
-    // Validation avec Joi
-    console.log("données reçues pour l'inscription", req.body)
-
     try {
         // Vérifier si l'utilisateur existe déjà
         const userExists = await User.findOne({ email: req.body.email });

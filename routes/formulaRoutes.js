@@ -46,6 +46,8 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+
+
 // --- ROUTES ADMINISTRATEUR (gestion) ---
 // Ces routes nécessitent d'être authentifié ET d'avoir le rôle 'admin'.
 
