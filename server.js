@@ -17,11 +17,30 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: true }));
+
+
+// Récupérer la ou les origines CORS depuis les variables d'environnement.
+// Si process.env.CORS_ORIGIN n'est pas défini, nous mettons une valeur par défaut pour le développement local.
+// On divise la chaîne par des virgules pour gérer plusieurs origines si nécessaire.
+const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',')
+    : ['http://localhost:3000', 'http://localhost:5000']; // Ajoutez d'autres origines locales si besoin
+
+
 //cors
 app.use(cors({
-    origin: true,
+    origin: (origin, callback) => {
+        // Permettre les requêtes sans origine (comme les applications mobiles ou curl)
+        // ou si l'origine fait partie de notre liste blanche.
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            // Rejeter la requête si l'origine n'est pas autorisée.
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
-    methods: "GET,PUT,DELETE,POST,PATCH"
+    methods: "GET,PUT,DELETE,POST,PATCH" // Spécifiez toutes les méthodes HTTP que votre API utilise
 }));
 
 app.use('/public/profile', express.static(__dirname + '/public/profile'));
@@ -51,14 +70,8 @@ app.use(`${api}/fidelity`, fidelityRoutes);
 
 
 
-
-
-
-
-
-
 mongoose.set("strictQuery", false);
-mongoose.connect(process.env.MONGODB_URL_ONLINE)
+mongoose.connect(process.env.MONGODB_URL)
     .then(() => console.log('DBconnection succès!'))//message à afficher si mongoDB fonctionne normalement
     .catch((err) => {
         console.log(err);
