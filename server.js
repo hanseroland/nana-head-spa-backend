@@ -1,12 +1,28 @@
+//server.js
 const express = require('express')
 const app = express()
+// ✅ Import du module http de Node.js
+const http = require('http')
+// ✅ Import de la classe Server de socket.io
+const { Server } = require('socket.io')
+
+
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const jwt = require('jsonwebtoken'); // ✅ Import jwt pour l'authentification Socket.IO
+
 
 dotenv.config();
 const api = process.env.API_URL;
+
+
+// ✅ Import modèles User, Conversation et Message
+const User = require('./models/user.model'); // Assurez-vous que le chemin est correct pour votre modèle User
+const Conversation = require('./models/conversation.model');
+const Message = require('./models/message.model');
+
 
 app.use(
     bodyParser.json({
@@ -22,8 +38,8 @@ app.use(express.urlencoded({ extended: true }));
 // Récupérer la ou les origines CORS depuis les variables d'environnement.
 // Si process.env.CORS_ORIGIN n'est pas défini, nous mettons une valeur par défaut pour le développement local.
 // On divise la chaîne par des virgules pour gérer plusieurs origines si nécessaire.
-const allowedOrigins = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',')
+const allowedOrigins = process.env.CORS_ORIGIN_ONLINE
+    ? process.env.CORS_ORIGIN_ONLINE.split(',')
     : ['http://localhost:3000', 'http://localhost:5000']; // Ajoutez d'autres origines locales si besoin
 
 
@@ -43,9 +59,23 @@ app.use(cors({
     methods: "GET,PUT,DELETE,POST,PATCH" // Spécifiez toutes les méthodes HTTP que votre API utilise
 }));
 
+
+
 app.use('/public/profile', express.static(__dirname + '/public/profile'));
 app.use('/public/article_image', express.static(__dirname + '/public/article_image'));
 
+
+// ✅ Création du serveur HTTP
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: allowedOrigins, // Socket.IO utilise sa propre configuration CORS
+        methods: ["GET", "POST"],
+        credentials: true
+    }
+});
+
+app.set('socketio', io); // Gardez cette ligne !
 
 
 //routes
@@ -55,6 +85,8 @@ const formulasRouter = require('./routes/formulaRoutes');
 const articlesRouter = require('./routes/articleRoutes');
 const appointmentsRouter = require('./routes/appointmentRoutes');
 const fidelityRoutes = require('./routes/fidelityRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+
 
 
 
@@ -66,6 +98,8 @@ app.use(`${api}/formulas`, formulasRouter);
 app.use(`${api}/articles`, articlesRouter);
 app.use(`${api}/appointments`, appointmentsRouter);
 app.use(`${api}/fidelity`, fidelityRoutes);
+app.use(`${api}/chat`, chatRoutes); // 
+
 
 
 
@@ -76,6 +110,102 @@ mongoose.connect(process.env.MONGODB_URL_ONLINE)
     .catch((err) => {
         console.log(err);
     });
+
+// ✅ Middleware d'authentification pour Socket.IO
+// Il vérifie le JWT du cookie et attache les informations de l'utilisateur au socket
+io.use(async (socket, next) => {
+    try {
+        const tokenCookie = socket.handshake.headers.cookie
+            ?.split(';')
+            .find(c => c.trim().startsWith('token='));
+
+        if (!tokenCookie) {
+            return next(new Error('Authentication error: No token provided'));
+        }
+
+        const token = tokenCookie.split('=')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        socket.userId = decoded.userId;
+        socket.userRole = decoded.role;
+        next();
+    } catch (err) {
+        console.error("Socket.IO Auth Error:", err.message);
+        next(new Error('Authentication error: Invalid or expired token'));
+    }
+});
+
+
+// GESTION DES CONNEXIONS SOCKET.IO
+io.on('connection', (socket) => {
+    console.log(`Un utilisateur s'est connecté via Socket.IO: ${socket.id}`);
+
+    // Associe l'ID d'utilisateur au socket pour faciliter le ciblage
+    // L'ID utilisateur devrait être envoyé depuis le client lors de la connexion Socket.IO
+    const userId = socket.handshake.query.userId;
+    if (userId) {
+        socket.join(userId); // Chaque utilisateur rejoint une "salle" nommée avec son ID
+        console.log(`Utilisateur ${userId} a rejoint la salle ${userId}`);
+    }
+
+    // Écoute l'événement 'send_message' envoyé par les clients
+    /*socket.on('send_message', async (messageData) => {
+        // messageData devrait contenir : conversationId, sender (ID de l'expéditeur), content, receiver (ID du destinataire)
+
+        try {
+            // Vérifier si l'expéditeur est bien le socket connecté pour des raisons de sécurité
+            if (messageData.sender !== userId) {
+                console.warn(`Tentative d'envoi de message avec un senderId non correspondant au socket connecté.`);
+                return;
+            }
+
+            // Enregistrer le message dans la base de données (cette partie est gérée par l'API REST 'send-message' aussi)
+            // Pour le temps réel, on l'émet immédiatement. La persistance est gérée par l'appel API.
+            // On s'assure que le message envoyé via socket aura un ID et timestamp pour le frontend
+            const newMessage = {
+                _id: new mongoose.Types.ObjectId(), // Génère un nouvel ID pour le message côté serveur Socket.IO
+                conversationId: messageData.conversationId,
+                sender: { _id: messageData.sender }, // Simule un objet sender populé pour le frontend
+                content: messageData.content,
+                timestamp: new Date(),
+                readBy: [messageData.sender],
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+
+            // Émettre le message au destinataire
+            // Si le destinataire est en ligne (dans sa "salle" Socket.IO)
+            if (messageData.receiver) {
+                // Émettre le message au destinataire spécifique
+                io.to(messageData.receiver).emit('receive_message', {
+                    ...newMessage,
+                    sender: { _id: messageData.sender, firstName: 'SenderFirstName', lastName: 'SenderLastName' } // Info de base pour affichage rapide
+                });
+            }
+            // Émettre le message à l'expéditeur lui-même pour confirmation (s'il n'est pas dans la même salle que le destinataire)
+            socket.emit('receive_message', {
+                ...newMessage,
+                sender: { _id: messageData.sender, firstName: 'SenderFirstName', lastName: 'SenderLastName' }
+            });
+
+            // Pour une gestion plus robuste de la population, il est préférable que l'API REST /send-message
+            // renvoie le message complétement populé (avec le sender complet) après sa persistance.
+            // Le socket peut ensuite recevoir cette confirmation ou un événement dédié.
+            // Pour l'instant, nous émettons une version simplifiée.
+
+
+        } catch (error) {
+            console.error('Erreur lors de l\'envoi du message via Socket.IO :', error);
+        }
+    })*/;
+
+    socket.on('disconnect', () => {
+        console.log(`Un utilisateur s'est déconnecté via Socket.IO: ${socket.id}`);
+        // Logique de nettoyage si nécessaire (ex: retirer l'utilisateur de ses salles)
+    });
+});
+// --- FIN CONFIGURATION DE SOCKET.IO ---
+
 
 app.listen(process.env.PORT || 5000, () => {
     console.log(api);

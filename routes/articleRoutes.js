@@ -210,28 +210,54 @@ router.delete('/:slug', authMiddleware, adminMiddleware, async (req, res) => {
 router.get('/', async (req, res) => {
     try {
         let query = {};
-        // Si l'utilisateur n'est PAS un admin, on filtre par isPublished: true
-        // ou si l'utilisateur est admin, il peut voir tous les articles (publiés ou non)
-        // en ajoutant un paramètre de requête ?showAll=true
-        if (!req.user || req.user.role !== 'admin' || req.query.showAll !== 'true') {
-            query.isPublished = true;
-        }
+        let limit = parseInt(req.query.limit) || 10;
+        let skip = parseInt(req.query.skip) || 0;
+        let sortOrder = req.query.sortOrder === 'asc' ? 1 : -1; // -1 pour décroissant (plus récent en premier)
 
-        // Optionnel : filtre par catégorie si un paramètre 'category' est présent
-        if (req.query.category) {
+        // Filtrage par statut de publication
+        // Par défaut, seulement les articles publiés pour les routes publiques
+        // `req.user` sera défini si l'utilisateur est authentifié et que le middleware `authMiddleware` est avant cette route
+        // Cependant, cette route est publique, donc `req.user` ne sera probablement pas défini ici.
+        // Nous allons donc toujours filtrer par `isPublished: true` pour la route publique `/articles`.
+        query.isPublished = true;
+
+
+        // Optionnel : filtre par catégorie
+        if (req.query.category && req.query.category !== 'Toutes les catégories') {
             const category = req.query.category.toLowerCase();
             if (['nouveauté', 'conseil'].includes(category)) {
                 query.category = category;
             }
         }
 
-        const articles = await Article.find(query).sort({ publishedAt: -1, createdAt: -1 }); // Trie par date de publication récente
+        // Optionnel : filtre par terme de recherche (titre ou contenu)
+        if (req.query.searchTerm) {
+            const searchTerm = req.query.searchTerm;
+            query.$or = [
+                { title: { $regex: searchTerm, $options: 'i' } },
+                { content: { $regex: searchTerm, $options: 'i' } },
+            ];
+            // Si vous voulez rechercher aussi sur le nom de l'auteur, cela devient plus complexe
+            // car l'auteur est dans une collection différente. Il faudrait faire une agrégation.
+            // Pour l'instant, on se limite au titre et contenu.
+        }
+
+        // Compter le nombre total d'articles correspondant aux filtres
+        const totalCount = await Article.countDocuments(query);
+
+        // Récupérer les articles avec tous les filtres, la pagination, le tri et le peuplement de l'auteur
+        const articles = await Article.find(query)
+            .populate('author', 'firstName lastName avatar') // ✅ PEUPLEMENT DE L'AUTEUR ICI
+            .sort({ publishedAt: sortOrder, createdAt: sortOrder }) // Tri par date de publication
+            .limit(limit)
+            .skip(skip);
 
         // Si aucune article n'est trouvée, renvoie un tableau vide avec 200 OK
         res.status(200).json({
             success: true,
             message: articles.length > 0 ? 'Articles récupérés avec succès.' : 'Aucun article trouvé.',
-            data: articles
+            data: articles,
+            totalCount: totalCount // ✅ Renvoie le nombre total pour la pagination côté client
         });
     } catch (error) {
         console.error("Erreur lors de la récupération des articles :", error);
