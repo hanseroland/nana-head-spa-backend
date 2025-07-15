@@ -18,10 +18,6 @@ dotenv.config();
 const api = process.env.API_URL;
 
 
-// ✅ Import modèles User, Conversation et Message
-const User = require('./models/user.model'); // Assurez-vous que le chemin est correct pour votre modèle User
-const Conversation = require('./models/conversation.model');
-const Message = require('./models/message.model');
 
 
 app.use(
@@ -61,8 +57,8 @@ app.use(cors({
 
 
 
-app.use('/public/profile', express.static(__dirname + '/public/profile'));
-app.use('/public/article_image', express.static(__dirname + '/public/article_image'));
+//app.use('/public/profile', express.static(__dirname + '/public/profile'));
+//app.use('/public/article_image', express.static(__dirname + '/public/article_image'));
 
 
 // ✅ Création du serveur HTTP
@@ -86,6 +82,9 @@ const articlesRouter = require('./routes/articleRoutes');
 const appointmentsRouter = require('./routes/appointmentRoutes');
 const fidelityRoutes = require('./routes/fidelityRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const galleryRoutes = require('./routes/galleryRoutes');
+const bannerRoutes = require('./routes/bannerRoutes');
+
 
 
 
@@ -98,7 +97,9 @@ app.use(`${api}/formulas`, formulasRouter);
 app.use(`${api}/articles`, articlesRouter);
 app.use(`${api}/appointments`, appointmentsRouter);
 app.use(`${api}/fidelity`, fidelityRoutes);
-app.use(`${api}/chat`, chatRoutes); // 
+app.use(`${api}/chat`, chatRoutes);
+app.use(`${api}/gallery-images`, galleryRoutes);
+app.use(`${api}/page-banners`, bannerRoutes);
 
 
 
@@ -207,7 +208,7 @@ io.on('connection', (socket) => {
 // --- FIN CONFIGURATION DE SOCKET.IO ---
 
 
-app.listen(process.env.PORT || 5000, () => {
+server.listen(process.env.PORT || 5000, () => {
     console.log(api);
     console.log('App listening on port http://localhost:5000');
 });

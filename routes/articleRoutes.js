@@ -6,8 +6,13 @@ const Article = require('../models/article.model.js');
 const authMiddleware = require('../middlewares/authMiddleware');
 const adminMiddleware = require('../middlewares/adminMiddleware');
 const mongoose = require('mongoose');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 
-const multer = require('multer'); // <-- Importe Multer
+// ✅ Importe les fonctions Cloudinary
+const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils/cloudinary');
+
 
 // --- Configuration de Multer pour les images d'articles ---
 const FILE_TYPE_MAP = {
@@ -17,7 +22,7 @@ const FILE_TYPE_MAP = {
     'image/webp': 'webp', // Ajout de webp si tu veux le supporter
 };
 
-const storage = multer.diskStorage({
+/*const storage = multer.diskStorage({
     destination: function (req, file, cb) {
         const isValid = FILE_TYPE_MAP[file.mimetype];
         let uploadError = new Error('Type de fichier image invalide.');
@@ -34,9 +39,25 @@ const storage = multer.diskStorage({
         const extension = FILE_TYPE_MAP[file.mimetype];
         cb(null, `${fileName}-${Date.now()}.${extension}`);
     }
-});
+});*/
 
-const uploadOptions = multer({ storage: storage });
+//const uploadOptions = multer({ storage: storage });
+
+
+const upload = multer({
+    // ✅ MODIFICATION ICI : Dossier temporaire non public à la racine du backend
+    dest: path.join(__dirname, '../temp_uploads/'),
+    limits: { fileSize: 5 * 1024 * 1024 }, // Limite de taille de fichier (ex: 5 Mo)
+    fileFilter: (req, file, cb) => {
+        // Valider le type de fichier
+        const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+        if (allowedMimes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Type de fichier image invalide. Seuls les PNG, JPEG, JPG, WEBP sont autorisés.'), false);
+        }
+    }
+});
 // --------------------------------------------------------
 
 
@@ -45,7 +66,7 @@ const uploadOptions = multer({ storage: storage });
 
 // POST Créer un nouvel article avec une image
 // Route: POST /api/v1/articles
-router.post('/', authMiddleware, adminMiddleware, uploadOptions.single('image'), async (req, res) => { // <-- Ajout de uploadOptions.single('image')
+router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => { // <-- Ajout de uploadOptions.single('image')
     try {
         const { title, category, content, isPublished } = req.body;
         const authorId = req.user.userId;
@@ -57,8 +78,8 @@ router.post('/', authMiddleware, adminMiddleware, uploadOptions.single('image'),
         }
 
         // Le chemin de l'image stocké par Multer
-        const basePath = `${req.protocol}://${req.get('host')}/public/article_image/`; // Ajuste le chemin d'accès public
-        const imageUrl = `${basePath}${file.filename}`;
+        //const basePath = `${req.protocol}://${req.get('host')}/public/article_image/`; // Ajuste le chemin d'accès public
+        //const imageUrl = `${basePath}${file.filename}`;
 
         if (!title || !category || !content || !authorId) {
             // Si des champs manquent après l'upload, supprime l'image uploadée si tu veux éviter les orphelins
@@ -66,12 +87,33 @@ router.post('/', authMiddleware, adminMiddleware, uploadOptions.single('image'),
             return res.status(400).json({ success: false, message: 'Les champs titre, catégorie, contenu et auteur sont requis.' });
         }
 
+
+        let imageInfo = {}; // Objet pour stocker les détails de l'image Cloudinary
+
+        // ✅ Upload l'image sur Cloudinary
+        const uploadResult = await uploadImageToCloudinary(file.path);
+
+        // ✅ Supprime le fichier temporaire de Multer après l'upload vers Cloudinary
+        if (fs.existsSync(file.path)) {
+            fs.unlinkSync(file.path);
+        }
+
+        if (!uploadResult.success) {
+            return res.status(500).json({ success: false, message: uploadResult.message });
+        }
+
+        imageInfo = {
+            public_id: uploadResult.public_id,
+            url: uploadResult.url,
+        };
+
+
         const newArticle = new Article({
             title,
             category,
             content,
             author: authorId,
-            image: imageUrl, // <-- Assigne l'URL de l'image
+            image: imageInfo, // <-- Assigne les infos Cloudinary
             isPublished: isPublished !== undefined ? isPublished : false,
         });
 
@@ -102,26 +144,26 @@ router.post('/', authMiddleware, adminMiddleware, uploadOptions.single('image'),
 
 // PUT Mettre à jour un article existant par son slug, avec possibilité de changer l'image
 // Route: PUT /api/v1/articles/:slug
-router.put('/:slug', authMiddleware, adminMiddleware, uploadOptions.single('image'), async (req, res) => { // <-- Ajout de uploadOptions.single('image')
+router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => { // <-- Ajout de uploadOptions.single('image')
     try {
         const { slug } = req.params;
-        const updates = req.body;
+        const { clearImage, ...updates } = req.body; // Déstructure clearImage du reste du corps
 
         const file = req.file;
-        let imageUrl;
+        //let imageUrl;
 
-        if (file) {
-            const basePath = `${req.protocol}://${req.get('host')}/public/articles_images/`;
-            imageUrl = `${basePath}${file.filename}`;
-            updates.image = imageUrl; // Met à jour le champ image avec la nouvelle URL
-        }
+        /* if (file) {
+             const basePath = `${req.protocol}://${req.get('host')}/public/articles_images/`;
+             imageUrl = `${basePath}${file.filename}`;
+             updates.image = imageUrl; // Met à jour le champ image avec la nouvelle URL
+         }*/
 
         // Trouver l'article existant pour potentiellement supprimer l'ancienne image
         const articleToUpdate = await Article.findOne({ slug: slug });
         if (!articleToUpdate) {
             // Si l'article n'existe pas, et une nouvelle image a été uploadée, supprime la nouvelle image
-            if (file) {
-                // require('fs').unlinkSync(file.path);
+            if (file && fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
             }
             return res.status(404).json({ success: false, message: 'Article introuvable.' });
         }
@@ -139,6 +181,43 @@ router.put('/:slug', authMiddleware, adminMiddleware, uploadOptions.single('imag
             }
         }
         */
+
+        // Logique de gestion de l'image
+        if (file) {
+            // Un nouveau fichier a été uploadé. Supprimer l'ancienne image si elle existe et uploader la nouvelle.
+            if (articleToUpdate.image && articleToUpdate.image.public_id) {
+                const deleteResult = await deleteImageFromCloudinary(articleToUpdate.image.public_id);
+                if (!deleteResult.success) {
+                    console.warn(`Avertissement: Impossible de supprimer l'ancienne image Cloudinary ${articleToUpdate.image.public_id}: ${deleteResult.message}`);
+                    // Ne pas bloquer la mise à jour si la suppression échoue, mais loggez l'erreur
+                }
+            }
+
+            // ✅ Uploader la nouvelle image sur Cloudinary
+            const uploadResult = await uploadImageToCloudinary(file.path);
+            // ✅ Supprimer le fichier temporaire de Multer
+            if (fs.existsSync(file.path)) {
+                fs.unlinkSync(file.path);
+            }
+
+            if (!uploadResult.success) {
+                return res.status(500).json({ success: false, message: uploadResult.message });
+            }
+            // Mettre à jour les informations de l'image dans les `updates`
+            updates.image = {
+                public_id: uploadResult.public_id,
+                url: uploadResult.url,
+            };
+        } else if (clearImage === 'true') {
+            // L'utilisateur a explicitement demandé de supprimer l'image existante
+            if (articleToUpdate.image && articleToUpdate.image.public_id) {
+                const deleteResult = await deleteImageFromCloudinary(articleToUpdate.image.public_id);
+                if (!deleteResult.success) {
+                    console.warn(`Avertissement: Impossible de supprimer l'ancienne image Cloudinary ${articleToUpdate.image.public_id}: ${deleteResult.message}`);
+                }
+            }
+            updates.image = null; // Définissez le champ 'image' à null pour le modèle Mongoose
+        }
 
         // Si le titre est mis à jour, le slug sera automatiquement mis à jour par le middleware Mongoose
         const updatedArticle = await Article.findOneAndUpdate(
@@ -180,19 +259,15 @@ router.delete('/:slug', authMiddleware, adminMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Article introuvable.' });
         }
 
-        // Optionnel : Supprimer l'image associée du serveur lors de la suppression de l'article
-        // Cela nécessite d'importer 'fs' et de reconstruire le chemin du fichier sur le système.
-        /*
-        if (deletedArticle.image && !deletedArticle.image.includes('placeholder')) {
-            const imagePathSegments = deletedArticle.image.split('/public/'); // Adapte selon ta structure d'URL
-            if (imagePathSegments.length > 1) {
-                const relativePath = `./public/${imagePathSegments[1]}`;
-                require('fs').unlink(relativePath, (err) => {
-                    if (err) console.error("Erreur lors de la suppression du fichier image :", err);
-                });
+        // ✅ Supprimer l'image associée de Cloudinary si elle existe
+        if (deletedArticle.image && deletedArticle.image.public_id) {
+            const deleteResult = await deleteImageFromCloudinary(deletedArticle.image.public_id);
+            if (!deleteResult.success) {
+                console.warn(`Avertissement: Impossible de supprimer l'image Cloudinary ${deletedArticle.image.public_id} lors de la suppression de l'article: ${deleteResult.message}`);
+                // Ne pas bloquer la suppression de l'article si l'image Cloudinary ne peut pas être supprimée
             }
         }
-        */
+
 
         res.status(200).json({ success: true, message: 'Article supprimé avec succès.' });
     } catch (error) {

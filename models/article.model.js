@@ -1,7 +1,7 @@
 // server/models/article.model.js
 
 const mongoose = require('mongoose');
-const slugify = require('slugify'); // Nécessite l'installation : npm install slugify
+const slugify = require('slugify');
 
 const articleSchema = new mongoose.Schema({
     title: {
@@ -34,10 +34,16 @@ const articleSchema = new mongoose.Schema({
         ref: 'User', // Fait référence au modèle User (assure-toi d'avoir un modèle User)
         required: [true, "L'auteur de l'article est requis."]
     },
+    // ✅ MODIFICATION ICI : Structure l'image pour Cloudinary
     image: {
-        type: String,
-        trim: true,
-        default: 'https://via.placeholder.com/600x400?text=Article+Image' // Image par défaut
+        public_id: {
+            type: String,
+            // Ne pas mettre 'required' ici si l'image peut être optionnelle ou avoir une valeur par défaut
+        },
+        url: {
+            type: String,
+            default: 'https://via.placeholder.com/600x400?text=Article+Image', // URL d'image par défaut
+        }
     },
     publishedAt: {
         type: Date,
