@@ -44,11 +44,14 @@ app.use(cors({
     origin: (origin, callback) => {
         // Permettre les requêtes sans origine (comme les applications mobiles ou curl)
         // ou si l'origine fait partie de notre liste blanche.
+        // console.log("➡️ Requête reçue de l'origine :", origin); // AJOUTEZ CETTE LIGNE
+
         if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             // Rejeter la requête si l'origine n'est pas autorisée.
-            callback(new Error('Not allowed by CORS'));
+            //  console.error("❌ Origine non autorisée :", origin);
+            callback(new Error('Not allowed by CORS A'));
         }
     },
     credentials: true,
@@ -149,20 +152,15 @@ io.on('connection', (socket) => {
         console.log(`Utilisateur ${userId} a rejoint la salle ${userId}`);
     }
 
-    // Écoute l'événement 'send_message' envoyé par les clients
-    /*socket.on('send_message', async (messageData) => {
-        // messageData devrait contenir : conversationId, sender (ID de l'expéditeur), content, receiver (ID du destinataire)
+    socket.on('send_message', async (messageData) => {
 
         try {
-            // Vérifier si l'expéditeur est bien le socket connecté pour des raisons de sécurité
             if (messageData.sender !== userId) {
                 console.warn(`Tentative d'envoi de message avec un senderId non correspondant au socket connecté.`);
                 return;
             }
 
-            // Enregistrer le message dans la base de données (cette partie est gérée par l'API REST 'send-message' aussi)
-            // Pour le temps réel, on l'émet immédiatement. La persistance est gérée par l'appel API.
-            // On s'assure que le message envoyé via socket aura un ID et timestamp pour le frontend
+
             const newMessage = {
                 _id: new mongoose.Types.ObjectId(), // Génère un nouvel ID pour le message côté serveur Socket.IO
                 conversationId: messageData.conversationId,
@@ -198,7 +196,7 @@ io.on('connection', (socket) => {
         } catch (error) {
             console.error('Erreur lors de l\'envoi du message via Socket.IO :', error);
         }
-    })*/;
+    })
 
     socket.on('disconnect', () => {
         console.log(`Un utilisateur s'est déconnecté via Socket.IO: ${socket.id}`);

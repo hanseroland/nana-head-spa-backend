@@ -8,18 +8,21 @@ const adminMiddleware = require('../middlewares/adminMiddleware');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils/cloudinary'); // Les mêmes fonctions marchent pour images/vidéos
+const { uploadMediaToCloudinary, deleteMediaFromCloudinary } = require('../utils/cloudinary');
 
 // Multer pour stockage temporaire
 const upload = multer({
     dest: path.join(__dirname, '../temp_uploads/'),
-    limits: { fileSize: 50 * 1024 * 1024 }, // Limite de taille: 50 Mo (pour les vidéos)
+    limits: { fileSize: 100 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'video/mp4', 'video/webm'];
+        const allowedMimes = [
+            'image/png', 'image/jpeg', 'image/jpg', 'image/webp',
+            'video/mp4', 'video/webm', 'video/quicktime'
+        ];
         if (allowedMimes.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error('Type de fichier de bannière invalide. Images (PNG, JPEG, JPG, WEBP) et Vidéos (MP4, WEBM) sont autorisées.'), false);
+            cb(new Error('Type de fichier de bannière invalide. Images (PNG, JPEG, JPG, WEBP) et Vidéos (MP4, WEBM, MOV) sont autorisées.'), false);
         }
     }
 });
@@ -41,14 +44,20 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('media'), async 
 
         let existingBanner = await PageBanner.findOne({ pageName: pageName.toLowerCase() });
 
-        // Si un nouveau média est uploadé
         if (file) {
+            // Déterminez le resource_type basé sur le champ 'type' du formulaire
+            const resourceType = type === 'video' ? 'video' : 'image';
+
             // Si une bannière existait déjà avec un média, supprime l'ancien média de Cloudinary
             if (existingBanner && existingBanner.media && existingBanner.media.public_id) {
-                await deleteImageFromCloudinary(existingBanner.media.public_id); // deleteImageFromCloudinary fonctionne aussi pour les vidéos
+                // ✅ Utilisez le type de ressource de l'ancien média pour la suppression
+                const oldResourceType = existingBanner.type === 'video' ? 'video' : 'image';
+                await deleteMediaFromCloudinary(existingBanner.media.public_id, oldResourceType);
             }
-            const uploadResult = await uploadImageToCloudinary(file.path); // La même fonction d'upload fonctionne
-            fs.unlinkSync(file.path); // Supprime le fichier temporaire
+
+            // ✅ Appelez la fonction générique d'upload avec le resourceType correct
+            const uploadResult = await uploadMediaToCloudinary(file.path, resourceType);
+            fs.unlinkSync(file.path);
 
             if (!uploadResult.success) {
                 return res.status(500).json({ success: false, message: uploadResult.message });
@@ -69,12 +78,10 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('media'), async 
             };
 
             if (existingBanner) {
-                // Mettre à jour la bannière existante
                 Object.assign(existingBanner, bannerData);
                 await existingBanner.save();
                 return res.status(200).json({ success: true, message: "Bannière mise à jour avec succès.", data: existingBanner });
             } else {
-                // Créer une nouvelle bannière
                 const newBanner = new PageBanner(bannerData);
                 await newBanner.save();
                 return res.status(201).json({ success: true, message: "Bannière créée avec succès.", data: newBanner });
@@ -82,14 +89,30 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('media'), async 
 
         } else {
             // Si aucun nouveau fichier n'est uploadé, on ne met à jour que le titre et le sous-titre
-            if (!existingBanner) {
+            // Ou on gère le cas `clearMedia`
+            const clearMedia = req.body.clearMedia === 'true'; // Récupère le champ 'clearMedia' du FormData
+
+            if (clearMedia && existingBanner && existingBanner.media && existingBanner.media.public_id) {
+                // ✅ Supprimer le média existant si demandé
+                const oldResourceType = existingBanner.type === 'video' ? 'video' : 'image';
+                await deleteMediaFromCloudinary(existingBanner.media.public_id, oldResourceType);
+                existingBanner.media = undefined; // Supprime le champ média
+            } else if (!existingBanner && !clearMedia) {
                 return res.status(400).json({ success: false, message: "Un fichier média est requis pour créer une nouvelle bannière." });
             }
-            existingBanner.title = title || '';
-            existingBanner.subtitle = subtitle || '';
-            existingBanner.lastUpdatedBy = req.user.userId;
-            await existingBanner.save();
-            return res.status(200).json({ success: true, message: "Bannière mise à jour avec succès (texte seulement).", data: existingBanner });
+
+            // Mise à jour des champs texte même sans nouveau fichier
+            if (existingBanner) {
+                existingBanner.title = title || '';
+                existingBanner.subtitle = subtitle || '';
+                existingBanner.type = type; // Le type peut changer même sans nouveau fichier
+                existingBanner.lastUpdatedBy = req.user.userId;
+                await existingBanner.save();
+                return res.status(200).json({ success: true, message: "Bannière mise à jour avec succès (texte et/ou suppression média).", data: existingBanner });
+            } else {
+                // Cas où il n'y a pas de bannière existante, pas de fichier et pas de clearMedia (devrait être géré par la validation initiale)
+                return res.status(400).json({ success: false, message: "Requête invalide: manque de données pour créer ou modifier." });
+            }
         }
 
     } catch (error) {
@@ -102,7 +125,7 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('media'), async 
 });
 
 // GET /api/v1/page-banners - Récupérer toutes les bannières (pour admin)
-router.get('/', authMiddleware, adminMiddleware, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const banners = await PageBanner.find();
         res.status(200).json({ success: true, data: banners });
@@ -137,7 +160,9 @@ router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
 
         // Supprimer le média de Cloudinary
         if (deletedBanner.media && deletedBanner.media.public_id) {
-            await deleteImageFromCloudinary(deletedBanner.media.public_id);
+            // ✅ Utilisez le type de ressource stocké dans la bannière pour la suppression
+            const resourceTypeToDelete = deletedBanner.type === 'video' ? 'video' : 'image';
+            await deleteMediaFromCloudinary(deletedBanner.media.public_id, resourceTypeToDelete);
         }
 
         res.status(200).json({ success: true, message: "Bannière supprimée avec succès." });

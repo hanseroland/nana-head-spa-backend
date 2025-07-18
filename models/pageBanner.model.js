@@ -7,7 +7,7 @@ const pageBannerSchema = new mongoose.Schema({
         type: String,
         required: [true, "Le nom de la page est requis."],
         unique: true, // Chaque page aura une seule bannière
-        enum: ['accueil', 'presentation', 'reservations', 'formules', 'contact'], // Pages spécifiques
+        enum: ['accueil', 'presentation', 'reservations', 'formules', 'contact', 'nouveautes', 'qui-suis-je', 'univers-de-nana-head-spa'], // Pages spécifiques
         lowercase: true,
         trim: true
     },
