@@ -8,7 +8,7 @@ const adminMiddleware = require('../middlewares/adminMiddleware');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils/cloudinary'); // Assurez-vous d'avoir ces fonctions
+const { uploadMediaToCloudinary, deleteMediaFromCloudinary } = require('../utils/cloudinary');
 
 // Multer pour stockage temporaire
 const upload = multer({
@@ -41,7 +41,8 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async 
             return res.status(400).json({ success: false, message: "Le titre de l'image est requis." });
         }
 
-        const uploadResult = await uploadImageToCloudinary(file.path);
+        // ✅ CORRECTION : Appel à uploadMediaToCloudinary
+        const uploadResult = await uploadMediaToCloudinary(file.path, 'image', 'nana-head-spa-gallery');
         fs.unlinkSync(file.path); // Supprime le fichier temporaire
 
         if (!uploadResult.success) {
@@ -117,12 +118,15 @@ router.put('/:id', authMiddleware, adminMiddleware, upload.single('image'), asyn
         const updates = { title, description, order: order !== undefined ? order : galleryImage.order };
 
         // Logique de gestion de l'image
+        // Logique de gestion de l'image
         if (file) {
             // Nouvelle image uploadée: supprimer l'ancienne et uploader la nouvelle
             if (galleryImage.image && galleryImage.image.public_id) {
-                await deleteImageFromCloudinary(galleryImage.image.public_id);
+                // ✅ CORRECTION : Appel à deleteMediaFromCloudinary avec 'image' comme resourceType
+                await deleteMediaFromCloudinary(galleryImage.image.public_id, 'image');
             }
-            const uploadResult = await uploadImageToCloudinary(file.path);
+            // ✅ CORRECTION : Appel à uploadMediaToCloudinary
+            const uploadResult = await uploadMediaToCloudinary(file.path, 'image', 'nana-head-spa-gallery');
             fs.unlinkSync(file.path);
 
             if (!uploadResult.success) {
@@ -133,9 +137,10 @@ router.put('/:id', authMiddleware, adminMiddleware, upload.single('image'), asyn
                 url: uploadResult.url
             };
         } else if (clearImage === 'true') {
-            // Demande explicite de suppression d'image sans remplacement
+
             if (galleryImage.image && galleryImage.image.public_id) {
-                await deleteImageFromCloudinary(galleryImage.image.public_id);
+                // ✅ CORRECTION : Appel à deleteMediaFromCloudinary
+                await deleteMediaFromCloudinary(galleryImage.image.public_id, 'image');
             }
             updates.image = { public_id: null, url: 'https://via.placeholder.com/600x400?text=Image+Supprimée' }; // Ou un placeholder approprié
         }
@@ -171,7 +176,7 @@ router.delete('/:id', authMiddleware, adminMiddleware, async (req, res) => {
 
         // Supprimer l'image de Cloudinary
         if (deletedImage.image && deletedImage.image.public_id) {
-            await deleteImageFromCloudinary(deletedImage.image.public_id);
+            await deleteMediaFromCloudinary(deletedImage.image.public_id, 'image');
         }
 
         res.status(200).json({ success: true, message: "Image de galerie supprimée." });

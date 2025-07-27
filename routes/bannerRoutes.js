@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { uploadMediaToCloudinary, deleteMediaFromCloudinary } = require('../utils/cloudinary');
 
+
 // Multer pour stockage temporaire
 const upload = multer({
     dest: path.join(__dirname, '../temp_uploads/'),
