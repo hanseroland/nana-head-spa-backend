@@ -94,15 +94,28 @@ router.post('/login', async (req, res) => {
             { expiresIn: '1d' }
         );
 
+        res.cookie('token', token, {
+            httpOnly: true, // Empêche l'accès via JavaScript côté client
+            secure: process.env.NODE_ENV === 'production', // true si HTTPS en production
+            sameSite: 'Lax', // Protection CSRF. 'None' avec 'secure: true' si nécessaire pour CORS strict.
+            expires: new Date(Date.now() + 24 * 60 * 60 * 1000), // Expiration 1 jour (doit correspondre à expiresIn du JWT)
+            domain: 'localhost', // ✅ TRÈS IMPORTANT pour le développement local
+            path: '/', // Rend le cookie accessible sur toutes les routes
+        });
+
         // Réponse avec le token
         res.status(200).send({
             success: true,
             message: 'Connexion réussie.',
             token: token,
             data: {
-                id: user._id,
+                id: user._id, // Utilise _id comme ID
                 email: user.email,
-                role: user.role, // Envoyez le rôle de l'utilisateur
+                firstName: user.firstName,
+                lastName: user.lastName,
+                phone: user.phone,
+                role: user.role,
+
                 // N'envoyez pas le mot de passe ou le hash du mot de passe ici
             },
         });

@@ -12,14 +12,14 @@ const populateConversationQuery = (query) => {
         .populate({
             path: 'participants',
             model: 'User',
-            select: 'firstName lastName role avatar _id'
+            select: 'firstName lastName role _id'
         })
         .populate({
             path: 'lastMessage',
             populate: {
                 path: 'sender',
                 model: 'User',
-                select: 'firstName lastName role avatar _id'
+                select: 'firstName lastName role _id'
             }
         });
 };
@@ -73,7 +73,7 @@ router.get('/:conversationId/messages', authMiddleware, async (req, res) => {
         }
 
         const messages = await Message.find({ conversationId })
-            .populate('sender', 'firstName lastName role avatar _id')
+            .populate('sender', 'firstName lastName role _id')
             .sort('timestamp');
 
         // Marquer les messages comme lus par l'utilisateur actuel (sauf ceux qu'il a envoyés)
@@ -192,7 +192,7 @@ router.post('/send-message', authMiddleware, async (req, res) => {
         await conversation.save();
 
         const populatedMessage = await Message.findById(newMessage._id)
-            .populate('sender', 'firstName lastName role avatar _id');
+            .populate('sender', 'firstName lastName role   _id');
 
         res.status(200).json({ success: true, data: populatedMessage });
 

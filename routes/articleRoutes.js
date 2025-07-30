@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 
 // ✅ Importe les fonctions Cloudinary
-const { uploadImageToCloudinary, deleteImageFromCloudinary } = require('../utils/cloudinary');
+const { uploadMediaToCloudinary, deleteMediaFromCloudinary } = require('../utils/cloudinary');
 
 
 // --- Configuration de Multer pour les images d'articles ---
@@ -44,12 +44,11 @@ const FILE_TYPE_MAP = {
 //const uploadOptions = multer({ storage: storage });
 
 
+// --- Configuration de Multer pour les images d'articles ---
 const upload = multer({
-    // ✅ MODIFICATION ICI : Dossier temporaire non public à la racine du backend
-    dest: path.join(__dirname, '../temp_uploads/'),
+    dest: path.join(__dirname, '../temp_uploads/'), // Dossier temporaire non public
     limits: { fileSize: 5 * 1024 * 1024 }, // Limite de taille de fichier (ex: 5 Mo)
     fileFilter: (req, file, cb) => {
-        // Valider le type de fichier
         const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
         if (allowedMimes.includes(file.mimetype)) {
             cb(null, true);
@@ -63,35 +62,29 @@ const upload = multer({
 
 // --- ROUTES ADMINISTRATEUR (gestion des articles) ---
 // Ces routes nécessitent d'être authentifié ET d'avoir le rôle 'admin'.
-
-// POST Créer un nouvel article avec une image
 // Route: POST /api/v1/articles
-router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => { // <-- Ajout de uploadOptions.single('image')
+router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => {
     try {
         const { title, category, content, isPublished } = req.body;
         const authorId = req.user.userId;
-
-        // Validation du fichier uploadé
         const file = req.file;
+
         if (!file) {
             return res.status(400).json({ success: false, message: "Une image est requise pour l'article." });
         }
 
-        // Le chemin de l'image stocké par Multer
-        //const basePath = `${req.protocol}://${req.get('host')}/public/article_image/`; // Ajuste le chemin d'accès public
-        //const imageUrl = `${basePath}${file.filename}`;
-
         if (!title || !category || !content || !authorId) {
-            // Si des champs manquent après l'upload, supprime l'image uploadée si tu veux éviter les orphelins
-            // require('fs').unlinkSync(file.path); // Nécessite 'fs' importé
+            if (fs.existsSync(file.path)) { // S'assurer que le fichier existe avant de tenter de le supprimer
+                fs.unlinkSync(file.path); // Nettoie le fichier temporaire
+            }
             return res.status(400).json({ success: false, message: 'Les champs titre, catégorie, contenu et auteur sont requis.' });
         }
 
-
         let imageInfo = {}; // Objet pour stocker les détails de l'image Cloudinary
 
-        // ✅ Upload l'image sur Cloudinary
-        const uploadResult = await uploadImageToCloudinary(file.path);
+        // ✅ CORRECTION : Appel à uploadMediaToCloudinary
+        // Spécifier 'image' comme resourceType et un dossier pour les articles
+        const uploadResult = await uploadMediaToCloudinary(file.path, 'image', 'nana-head-spa-gallery');
 
         // ✅ Supprime le fichier temporaire de Multer après l'upload vers Cloudinary
         if (fs.existsSync(file.path)) {
@@ -107,13 +100,12 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async 
             url: uploadResult.url,
         };
 
-
         const newArticle = new Article({
             title,
             category,
             content,
             author: authorId,
-            image: imageInfo, // <-- Assigne les infos Cloudinary
+            image: imageInfo, // Assigne les infos Cloudinary
             isPublished: isPublished !== undefined ? isPublished : false,
         });
 
@@ -121,9 +113,8 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async 
         res.status(201).json({ success: true, message: 'Article créé avec succès.', data: savedArticle });
 
     } catch (error) {
-        // En cas d'erreur, supprime l'image si elle a été uploadée avant l'erreur de BDD
-        if (req.file) {
-            // require('fs').unlinkSync(req.file.path); // Décommente si tu veux nettoyer en cas d'erreur
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path); // Nettoyage en cas d'erreur
         }
         if (error.code === 11000 && error.keyPattern) {
             if (error.keyPattern.title) {
@@ -144,57 +135,33 @@ router.post('/', authMiddleware, adminMiddleware, upload.single('image'), async 
 
 // PUT Mettre à jour un article existant par son slug, avec possibilité de changer l'image
 // Route: PUT /api/v1/articles/:slug
-router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => { // <-- Ajout de uploadOptions.single('image')
+router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), async (req, res) => {
     try {
         const { slug } = req.params;
-        const { clearImage, ...updates } = req.body; // Déstructure clearImage du reste du corps
-
+        const { clearImage, ...updates } = req.body;
         const file = req.file;
-        //let imageUrl;
 
-        /* if (file) {
-             const basePath = `${req.protocol}://${req.get('host')}/public/articles_images/`;
-             imageUrl = `${basePath}${file.filename}`;
-             updates.image = imageUrl; // Met à jour le champ image avec la nouvelle URL
-         }*/
-
-        // Trouver l'article existant pour potentiellement supprimer l'ancienne image
         const articleToUpdate = await Article.findOne({ slug: slug });
         if (!articleToUpdate) {
-            // Si l'article n'existe pas, et une nouvelle image a été uploadée, supprime la nouvelle image
             if (file && fs.existsSync(file.path)) {
                 fs.unlinkSync(file.path);
             }
             return res.status(404).json({ success: false, message: 'Article introuvable.' });
         }
 
-        // Si une nouvelle image a été uploadée, et que l'ancienne image n'est pas l'image par défaut,
-        // tu peux envisager de supprimer l'ancienne image du serveur.
-        // Cela nécessite d'importer 'fs' et d'avoir un chemin absolu ou relatif gérable.
-        /*
-        if (file && articleToUpdate.image && !articleToUpdate.image.includes('placeholder')) {
-            const oldImagePath = articleToUpdate.image.split(`${req.protocol}://${req.get('host')}/`)[1];
-            if (oldImagePath) {
-                require('fs').unlink(oldImagePath, (err) => {
-                    if (err) console.error("Erreur lors de la suppression de l'ancienne image:", err);
-                });
-            }
-        }
-        */
-
         // Logique de gestion de l'image
         if (file) {
             // Un nouveau fichier a été uploadé. Supprimer l'ancienne image si elle existe et uploader la nouvelle.
             if (articleToUpdate.image && articleToUpdate.image.public_id) {
-                const deleteResult = await deleteImageFromCloudinary(articleToUpdate.image.public_id);
+                // ✅ CORRECTION : Appel à deleteMediaFromCloudinary
+                const deleteResult = await deleteMediaFromCloudinary(articleToUpdate.image.public_id, 'image');
                 if (!deleteResult.success) {
                     console.warn(`Avertissement: Impossible de supprimer l'ancienne image Cloudinary ${articleToUpdate.image.public_id}: ${deleteResult.message}`);
-                    // Ne pas bloquer la mise à jour si la suppression échoue, mais loggez l'erreur
                 }
             }
 
-            // ✅ Uploader la nouvelle image sur Cloudinary
-            const uploadResult = await uploadImageToCloudinary(file.path);
+            // ✅ CORRECTION : Uploader la nouvelle image sur Cloudinary
+            const uploadResult = await uploadMediaToCloudinary(file.path, 'image', 'nana-head-spa-gallery');
             // ✅ Supprimer le fichier temporaire de Multer
             if (fs.existsSync(file.path)) {
                 fs.unlinkSync(file.path);
@@ -203,7 +170,6 @@ router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), as
             if (!uploadResult.success) {
                 return res.status(500).json({ success: false, message: uploadResult.message });
             }
-            // Mettre à jour les informations de l'image dans les `updates`
             updates.image = {
                 public_id: uploadResult.public_id,
                 url: uploadResult.url,
@@ -211,7 +177,8 @@ router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), as
         } else if (clearImage === 'true') {
             // L'utilisateur a explicitement demandé de supprimer l'image existante
             if (articleToUpdate.image && articleToUpdate.image.public_id) {
-                const deleteResult = await deleteImageFromCloudinary(articleToUpdate.image.public_id);
+                // ✅ CORRECTION : Appel à deleteMediaFromCloudinary
+                const deleteResult = await deleteMediaFromCloudinary(articleToUpdate.image.public_id, 'image');
                 if (!deleteResult.success) {
                     console.warn(`Avertissement: Impossible de supprimer l'ancienne image Cloudinary ${articleToUpdate.image.public_id}: ${deleteResult.message}`);
                 }
@@ -219,7 +186,6 @@ router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), as
             updates.image = null; // Définissez le champ 'image' à null pour le modèle Mongoose
         }
 
-        // Si le titre est mis à jour, le slug sera automatiquement mis à jour par le middleware Mongoose
         const updatedArticle = await Article.findOneAndUpdate(
             { slug: slug },
             updates,
@@ -232,9 +198,8 @@ router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), as
         res.status(200).json({ success: true, message: 'Article mis à jour avec succès.', data: updatedArticle });
 
     } catch (error) {
-        // En cas d'erreur lors de la mise à jour, supprime la nouvelle image uploadée si elle existe
-        if (req.file) {
-            // require('fs').unlinkSync(req.file.path);
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
         }
         if (error.code === 11000 && error.keyPattern && error.keyPattern.title) {
             return res.status(409).json({ success: false, message: 'Un autre article avec ce titre existe déjà.' });
@@ -252,22 +217,18 @@ router.put('/:slug', authMiddleware, adminMiddleware, upload.single('image'), as
 // Route: DELETE /api/v1/articles/:slug
 router.delete('/:slug', authMiddleware, adminMiddleware, async (req, res) => {
     try {
-        const { slug } = req.params;
-
         const deletedArticle = await Article.findOneAndDelete({ slug: slug });
         if (!deletedArticle) {
             return res.status(404).json({ success: false, message: 'Article introuvable.' });
         }
 
-        // ✅ Supprimer l'image associée de Cloudinary si elle existe
+        // ✅ CORRECTION : Supprimer l'image associée de Cloudinary si elle existe
         if (deletedArticle.image && deletedArticle.image.public_id) {
-            const deleteResult = await deleteImageFromCloudinary(deletedArticle.image.public_id);
+            const deleteResult = await deleteMediaFromCloudinary(deletedArticle.image.public_id, 'image');
             if (!deleteResult.success) {
                 console.warn(`Avertissement: Impossible de supprimer l'image Cloudinary ${deletedArticle.image.public_id} lors de la suppression de l'article: ${deleteResult.message}`);
-                // Ne pas bloquer la suppression de l'article si l'image Cloudinary ne peut pas être supprimée
             }
         }
-
 
         res.status(200).json({ success: true, message: 'Article supprimé avec succès.' });
     } catch (error) {
