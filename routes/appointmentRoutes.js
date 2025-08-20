@@ -8,6 +8,12 @@ const Formula = require('../models/formula.model.js'); // Importe le modèle For
 const authMiddleware = require('../middlewares/authMiddleware.js'); // Pour l'authentification
 const adminMiddleware = require('../middlewares/adminMiddleware.js'); // Pour la vérification du rôle admin
 const mongoose = require('mongoose');
+// ✅ Import du service d'email
+const {
+    sendAppointmentConfirmationEmail,
+    sendAppointmentConfirmedEmail,
+    sendAppointmentCancelledEmail
+} = require('../utils/emailService');
 
 // Helper pour formater l'heure de début/fin pour la comparaison
 const parseTime = (timeString) => {
@@ -107,9 +113,16 @@ router.post('/', authMiddleware, async (req, res) => {
             status: 'pending' // Par défaut en attente de confirmation
         });
 
-        console.log("existingAppointment  :", newAppointment);
+        //console.log("existingAppointment  :", newAppointment);
 
         const savedAppointment = await newAppointment.save();
+
+        // ✅ 1. ENVOI DU MAIL DE DEMANDE DE RDV
+        const client = await User.findById(clientId); // Récupérer les informations du client
+        if (client) {
+            await sendAppointmentConfirmationEmail(client.email, client.firstName);
+        }
+
         res.status(201).json({ success: true, message: 'Rendez-vous pris avec succès. En attente de confirmation.', data: savedAppointment });
 
 
@@ -419,6 +432,19 @@ router.put('/:id/cancel', authMiddleware, async (req, res) => {
         }
 
         const updatedAppointment = await appointment.save();
+
+        // ✅ 3. ENVOI DU MAIL D'ANNULATION 
+        const client = await User.findById(updatedAppointment.client).populate('formula');
+        if (client && client.email) {
+            const appointmentDetails = {
+                date: new Date(updatedAppointment.date).toLocaleDateString(),
+                startTime: updatedAppointment.startTime,
+                formulaName: client.formula.name // Assurez-vous que le modèle Appointment a bien une référence à Formula
+            };
+            await sendAppointmentCancelledEmail(client.email, client.firstName, appointmentDetails, cancellationReason);
+        }
+
+
         res.status(200).json({ success: true, message: 'Rendez-vous annulé avec succès.', data: updatedAppointment });
 
     } catch (error) {
@@ -590,6 +616,22 @@ router.put('/:id', authMiddleware, adminMiddleware, async (req, res) => {
         appointment.processedBy = adminId;
 
         const updatedAppointment = await appointment.save();
+
+        // ✅ 2. ENVOI DU MAIL DE CONFIRMATION si le statut passe à 'confirmed'
+        if (oldStatus !== 'confirmed' && updatedAppointment.status === 'confirmed') {
+            const client = await User.findById(updatedAppointment.client);
+            const formula = await Formula.findById(updatedAppointment.formula);
+
+            if (client && formula && client.email) {
+                const appointmentDetails = {
+                    date: new Date(updatedAppointment.date).toLocaleDateString(),
+                    startTime: updatedAppointment.startTime,
+                    formulaName: formula.name
+                };
+                await sendAppointmentConfirmedEmail(client.email, client.firstName, appointmentDetails);
+            }
+        }
+
         res.status(200).json({ success: true, message: 'Rendez-vous mis à jour avec succès.', data: updatedAppointment });
 
     } catch (error) {

@@ -107,7 +107,7 @@ router.post('/login', async (req, res) => {
         res.status(200).send({
             success: true,
             message: 'Connexion réussie.',
-            token: token,
+            //token: token,
             data: {
                 id: user._id, // Utilise _id comme ID
                 email: user.email,
@@ -124,5 +124,16 @@ router.post('/login', async (req, res) => {
         res.status(500).send({ success: false, message: 'Erreur serveur interne lors de la connexion.', error: err.message });
     }
 });
+
+
+router.post('/logout', (req, res) => {
+    res.clearCookie("token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: "Lax",
+    });
+    res.status(200).send({ success: true, message: "Déconnecté." });
+});
+
 
 module.exports = router;
