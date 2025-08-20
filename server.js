@@ -29,8 +29,8 @@ app.use(express.urlencoded({ extended: true }));
 // Si process.env.CORS_ORIGIN n'est pas défini, nous mettons une valeur par défaut pour le développement local.
 // On divise la chaîne par des virgules pour gérer plusieurs origines si nécessaire.
 
-const allowedOrigins = process.env.CORS_ORIGIN_LOCAL
-    ? process.env.CORS_ORIGIN_LOCAL.split(',')
+const allowedOrigins = process.env.CORS_ORIGIN_ONLINE
+    ? process.env.CORS_ORIGIN_ONLINE.split(',')
     : ['http://localhost:3000', 'http://localhost:5000']; // Ajoutez d'autres origines locales si besoin
 
 
@@ -93,7 +93,7 @@ app.use(`${api}/page-banners`, bannerRoutes);
 
 
 mongoose.set("strictQuery", false);
-mongoose.connect(process.env.MONGODB_URL_LOCAL)
+mongoose.connect(process.env.MONGODB_URL_ONLINE)
     .then(() => console.log('DBconnection succès!'))//message à afficher si mongoDB fonctionne normalement
     .catch((err) => {
         console.log(err);
